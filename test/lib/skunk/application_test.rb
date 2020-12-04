@@ -3,6 +3,7 @@
 require "test_helper"
 require "skunk/cli/application"
 require "rubycritic/core/analysed_module"
+require "minitest/stub_const"
 
 describe Skunk::Cli::Application do
   describe "#execute" do
@@ -48,6 +49,38 @@ describe Skunk::Cli::Application do
 
         _(File.read("tmp/generated_report.txt"))
           .must_equal File.read("test/samples/console_output.txt")
+      end
+    end
+
+    context "when passing an environment variable SHARE=true" do
+      let(:argv) { ["--out=tmp/shared_report.txt", "samples/rubycritic"] }
+      let(:success_code) { 0 }
+      let(:shared_message) do
+        "Shared at: https://skunk.fastruby.io/j"
+      end
+
+      around do |example|
+        VCR.use_cassette "skunk-fyi" do
+          example.call
+        end
+      end
+
+      it "share report to default server" do
+        FileUtils.rm("tmp/shared_report.txt", force: true)
+        FileUtils.mkdir_p("tmp")
+
+        env = ENV.to_hash.merge("SHARE" => "true")
+
+        Object.stub_const(:ENV, env) do
+          RubyCritic::AnalysedModule.stub_any_instance(:churn, 1) do
+            RubyCritic::AnalysedModule.stub_any_instance(:coverage, 100.0) do
+              result = application.execute
+              _(result).must_equal success_code
+              output = File.read("tmp/shared_report.txt")
+              _(output).must_include(shared_message)
+            end
+          end
+        end
       end
     end
   end
